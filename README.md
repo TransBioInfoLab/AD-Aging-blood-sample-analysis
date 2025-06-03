@@ -81,4 +81,4 @@ Data used in the preparation of this article were obtained from the Alzheimer’
 
 ## Reference
 
-- [^1]: Zhang W, Young JI, Gomez L, et al. Blood DNA methylation signature for incident dementia: Evidence from longitudinal cohorts. *Alzheimer's Dement.* 2025; 21:e14496. https://doi.org/10.1002/alz.14496
+[^1]: Zhang W, Young JI, Gomez L, et al. Blood DNA methylation signature for incident dementia: Evidence from longitudinal cohorts. *Alzheimer's Dement.* 2025; 21:e14496. https://doi.org/10.1002/alz.14496
