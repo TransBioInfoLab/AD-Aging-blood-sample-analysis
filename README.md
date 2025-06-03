@@ -44,36 +44,36 @@ The pre-processing procedures were previously described[^1].
 
 | File                 | Link |
 |----------------------|-------------|
-| code/dmr/combp_annotation.R | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/dmr/combp_annotation.R) |
-| code/dmr/coMethDMR.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/dmr/coMethDMR.Rmd) |
+| code/dmr/combp_annotation.R | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/dmr/combp_annotation.R) |
+| code/dmr/coMethDMR.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/dmr/coMethDMR.Rmd) |
 
 ### 4. **Integrative analyses with gene expression**
 
 | File                             | Link                                                         |
 | -------------------------------- | ------------------------------------------------------------ |
-| code/dnam_vs_rna/dnam_vs_rna.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/dnam_vs_rna/dnam_vs_rna.Rmd) |
+| code/dnam_vs_rna/dnam_vs_rna.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/dnam_vs_rna/dnam_vs_rna.Rmd) |
 
 ### 5. Correlate expression in brain and blood samples
 
 | File                 | Link |
 |----------------------|-------------|
-| code/brain_blood_corr/brain_blood_corr.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/brain_blood_corr/brain_blood_corr.Rmd) |
+| code/brain_blood_corr/brain_blood_corr.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/brain_blood_corr/brain_blood_corr.Rmd) |
 
 ### 6. **Validation using independent datasets**
 
 | File                 | Link |
 |----------------------|-------------|
-| code/compare_study/compare_study_miami_ad.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/compare_study/compare_study_miami_ad.Rmd) |
+| code/compare_study/compare_study_miami_ad.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/compare_study/compare_study_miami_ad.Rmd) |
 
 ### 7. Assessment Plots
 
 | File                 | Link |
 |----------------------|-------------|
-| code/analysis/manhattan_plot.R | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/analysis/manhattan_plot.R) |
+| code/analysis/manhattan_plot.R | [Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/analysis/manhattan_plot.R) |
 
 ## For reproducible research
 
-To perform the analysis, begin by installing the packages found in `session_info.R` ([Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/session_info.R)). Then, load the auxiliary functions from folder `code/utility` ([Link to the file](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/tree/main/code/utility)). Follow the sequence provided in the Description to conduct the analysis.
+To perform the analysis, begin by installing the packages found in `session_info.R` ([Link to the script](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/blob/main/code/session_info.R)). Then, load the auxiliary functions from folder `code/utility` ([Link to the file](https://github.com/TransBioInfoLab/AD-Aging-blood-sample-analysis/tree/main/code/utility)). Follow the sequence provided in the Description to conduct the analysis.
 
 ## Acknowledgement
 
