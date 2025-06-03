@@ -44,7 +44,7 @@ The pre-processing procedures were previously described[^1].
 
 | File                 | Link |
 |----------------------|-------------|
-| code/dmr/combp_annotation.R | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/analysis/dmr/combp_annotation.R) |
+| code/dmr/combp_annotation.R | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/dmr/combp_annotation.R) |
 | code/dmr/coMethDMR.Rmd | [Link to the script](https://github.com/TransBioInfoLab/AD-aging-blood-samples-analysis/blob/main/code/dmr/coMethDMR.Rmd) |
 
 ### 4. **Integrative analyses with gene expression**
