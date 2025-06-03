@@ -1,0 +1,552 @@
+---
+title: "Find DMR using coMethDMR"
+author: 
+  - Wei Zhang^[University of Miami]
+  - Lily Wang^[University of Miami]
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_document:
+    highlight: pygments
+    theme: yeti
+    toc: true
+    number_sections: true
+    df_print: paged
+    code_download: false
+    toc_float:
+      collapsed: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: inline    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, eval = F)
+
+dir.base <- "~/TBL Dropbox/Wei Zhang/AD-Aging-blood-sample-analysis"
+# Create and retrieve dir
+dir.data <- file.path(dir.base,"../DATASETS/")
+dir.data.dmr <- file.path(dir.base, "datasets/DMR/")
+dir.data.aux <- file.path(dir.data, "Aux_Sync")
+
+# Create results dir
+dir.results <- file.path(dir.base, "analysis_results/DMR")
+dir.results.meta <- file.path(dir.base, "analysis_results/meta_analysis")
+#for(p in grep("dir.",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+library(tidyverse)
+```
+
+```{r warning=F,message=F, eval = T}
+# Required packages
+library(coMethDMR)
+library(BiocParallel)
+library(SummarizedExperiment)
+library(survival)
+library(janitor)
+# Required functions
+source(file.path(dir.base, "code/utility/meta.R"))
+source(file.path(dir.base, "code/utility/coMethDMR_aux.R"))
+source(file.path(dir.base, "code/utility/annotation_and_bacon.R"))
+```
+
+# Extract clusters of CpGs located closely 
+
+```{r eval = F}
+region <- get_genomic_range(
+  array = "EPICv1",
+  genome = "hg38",
+  dir.data.aux = dir.data.aux
+)
+
+WriteCloseByAllRegions(
+  fileName = file.path(dir.data.dmr, "EPIC_hg38_region.rds"),
+  region = region,
+  genome = "hg38",
+  arrayType = "EPIC",
+  maxGap = 200,
+  minCpGs = 3
+)
+```
+
+```{r}
+coMeth_region <- readRDS(file.path(dir.data.dmr, "EPIC_hg38_region.rds"))
+```
+
+# Find ADNI DMR
+
+## Load Data
+
+```{r}
+dir.data <- file.path(dir.base, "../DNAm-Longitudinal-Cognition/datasets/ADNI/BEclear") 
+adni_se <- readRDS(
+  file.path(dir.data, "ADNI_BEclear_se.rds")
+)
+# Remove samples < 65
+adni_se <- adni_se[,adni_se$age_at_visit >= 65] # 211
+# Remove DEM_STATUS == 1
+adni_se <- adni_se[,adni_se$DEM_STATUS == 0] # 193
+pheno_adni <- colData(adni_se) %>%
+  data.frame()
+beta <- assay(adni_se)
+```
+
+## Find comethylated clusters
+
+```{r}
+celltype <- c("B", "NK", "CD4T", "Mono", "Gran")
+resid_mat <- getResid(
+  mat = beta,
+  betaToM = T,
+  pheno = pheno_adni %>% dplyr::select(c("PTGENDER", celltype)),
+  nCore = 50
+)
+### Find co-methylated clusters
+coMeth_ls <- CoMethAllRegions(
+  dnam = resid_mat,      
+  betaToM = F,                   
+  CpGs_ls = coMeth_region,
+  genome = "hg38",
+  arrayType = "EPIC",
+  method = "spearman",             
+  returnAllCpGs = TRUE,              
+  output = "CpGs",
+  nCores_int = 50,
+  progressbar = TRUE
+)
+save(
+  resid_mat,
+  coMeth_ls,
+  file = file.path(dir.data.dmr,"ADNI_resid_mat_and_coMeth_ls.rda")
+)
+```
+
+## Map input region to output region
+
+```{r}
+load(file.path(dir.data.dmr,"ADNI_resid_mat_and_coMeth_ls.rda"))
+```
+
+```{r}
+input_region <- names(coMeth_region)
+output_region <- names(coMeth_ls)
+map_table <- map_input_output_region(input_region, output_region)
+```
+
+## Test with regression on median value
+
+```{r}
+M <- minfi::logit2(beta)
+coMeth.results <- getSigRegion(
+  coMeth.list = coMeth_ls,
+  M = M,
+  pheno = pheno_adni,
+  test_var = "age_at_visit",
+  adjust_var = c("PTGENDER", celltype),
+  nCore = 30
+)
+coMeth.results <- coMeth.results %>% 
+  dplyr::mutate(input_region = map_table$input_region[match(region, map_table$output_region)],
+                out_region = region, .keep = "unused", .before = 1) 
+```
+
+```{r}
+## For multiple region, select the smallest pvalue
+coMeth.results <- coMeth.results %>% 
+  group_by(input_region) %>% 
+  slice_min(pr_t, with_ties = F)
+```
+
+```{r}
+coMeth.results %>% readr::write_csv(
+  file.path(dir.results, "ADNI_coMeth_median_results.csv")
+)
+```
+
+## Bacon correction
+
+```{r warning = F}
+coMeth.results$z <- qnorm(coMeth.results$pr_t)
+result_bacon <- bacon_adj(
+  coMeth.results,
+  est_var = "estimate",
+  z_var = "z",
+  std_var = "std_error",
+  save = T,
+  dir.save = dir.results,
+  prefix = "ADNI_coMeth_median")
+```
+
+```{r echo = F, eval = T}
+readxl::read_xlsx(
+  file.path(dir.results, "ADNI_coMeth_median_inflation_stats.xlsx")
+) %>% 
+  t() %>%
+  data.frame(values = .)
+```
+
+
+# Find FHS DMR
+
+## Load Data
+
+```{r}
+# Load data from previous analysis
+dir.data <- file.path(dir.base,"../DATASETS/Framingham")
+dir.data.processed <- file.path(dir.data, "DNAm/processed/EPIC") 
+framingham_se <- readRDS(
+  file.path(dir.data.processed, "FHS_OffSpring_EPIC_rm_dem_nw_se.RDS")
+)
+# Remove samples < 65
+framingham_se <- framingham_se[,framingham_se$Age_at_collection >= 65] # 741
+# Remove DEM_STATUS == 1
+framingham_se <- framingham_se[,framingham_se$DEM_STATUS == 0] # 699
+pheno <- colData(framingham_se) %>%
+  data.frame()
+beta <- assay(framingham_se)
+# Select samples that have highest bc score in each pedno
+pheno_fhs <- pheno %>% 
+  group_by(pedno) %>% 
+  slice_max(bisulfiteConversion) #282
+beta_selected <- beta[,pheno_fhs$sample]
+```
+
+## Find comethylated clusters
+
+```{r}
+celltype <- c("B", "NK", "CD4T", "Mono", "Gran")
+resid_mat <- getResid(
+  mat = beta_selected,
+  betaToM = T,
+  pheno = pheno_fhs %>% dplyr::select(c("sex", celltype)),
+  nCore = 50
+)
+### Find co-methylated clusters
+coMeth_ls <- CoMethAllRegions(
+  dnam = resid_mat,      
+  betaToM = F,                   
+  CpGs_ls = coMeth_region,
+  arrayType = "EPIC",
+  genome = "hg38",
+  method = "spearman",             
+  returnAllCpGs = TRUE,              
+  output = "CpGs",
+  nCores_int = 50,
+  progressbar = TRUE
+)
+save(
+  resid_mat,
+  coMeth_ls,
+  file = file.path(dir.data.dmr,"FHS_resid_mat_and_coMeth_ls_combp.rda")
+)
+```
+
+## Map input region to output region
+
+```{r}
+load(file.path(dir.data.dmr,"FHS_resid_mat_and_coMeth_ls_combp.rda"))
+```
+
+```{r}
+input_region <- names(coMeth_region)
+output_region <- names(coMeth_ls)
+map_table <- map_input_output_region(input_region, output_region)
+```
+
+## Test with survival
+
+```{r}
+M <- minfi::logit2(beta_selected)
+coMeth.results <- getSigRegion(
+  coMeth.list = coMeth_ls,
+  M = M,
+  pheno = pheno_fhs,
+  test_var = "Age_at_collection",
+  adjust_var = c("sex", celltype),
+  nCore = 50
+)
+coMeth.results <- coMeth.results %>% 
+  dplyr::mutate(input_region = map_table$input_region[match(region, map_table$output_region)],
+                out_region = region, .keep = "unused", .before = 1) 
+```
+
+```{r}
+## For multiple region, select the smallest pvalue
+coMeth.results <- coMeth.results %>% 
+  group_by(input_region) %>% 
+  slice_min(pr_t, with_ties = F)
+```
+
+```{r}
+coMeth.results %>% readr::write_csv(
+  file.path(dir.results, "FHS_coMeth_median_results.csv")
+)
+```
+
+## Bacon correction
+
+```{r warning = F}
+coMeth.results$z <- qnorm(coMeth.results$pr_t)
+result_bacon <- bacon_adj(
+  coMeth.results,
+  est_var = "estimate",
+  z_var = "z",
+  std_var = "std_error",
+  save = T,
+  dir.save = dir.results,
+  prefix = "FHS_coMeth_median")
+```
+
+```{r echo = F, eval = T}
+readxl::read_xlsx(
+  file.path(dir.results, "FHS_coMeth_median_inflation_stats.xlsx")
+) %>% 
+  t() %>%
+  data.frame(values = .)
+```
+
+# Meta analysis
+
+## Analysis
+
+```{r}
+adni_results <- read_csv(file.path(dir.results, "ADNI_coMeth_median_bacon_correction.csv"))
+results_adni <- adni_results %>% 
+  mutate(study = "ADNI",
+         study_id = "ADNI")
+fhs_results <- read_csv(file.path(dir.results, "FHS_coMeth_median_bacon_correction.csv"))
+results_fhs9 <- fhs_results %>% 
+  mutate(study = "FHS",
+         study_id = "FHS9")
+```
+
+```{r}
+# Create list for meta analysis
+results_list <- list(
+  FHS9 = results_fhs9,
+  ADNI = results_adni
+)
+# Function meta_wrapper load from meta.R
+results <- meta_wrapper(
+  results_list = results_list,
+  effect = "Estimate.bacon",
+  se = "StdErr.bacon",
+  sm = "MD",
+  test_var = "input_region",
+  select_var = NULL
+)
+# Save results
+write_csv(
+  results,
+  file.path(dir.results,
+            "meta_analysis_FHS9_ADNI_DMR_results.csv")
+)
+```
+
+## Annotation
+
+```{r}
+results <- read_csv(
+  file.path(dir.results,
+            "meta_analysis_FHS9_ADNI_DMR_results.csv"),
+  show_col_types = F
+)
+results_meta <- read_csv(
+  file.path(dir.results.meta, "meta_analysis_FHS9_ADNI_results.csv"),
+  show_col_types = F
+)
+```
+
+```{r}
+results_anno <- add_dmr_annotation(
+  result = results,
+  cpg = results_meta$cpg,
+  dir.data.aux = dir.data.aux,
+  region_var = "input_region",
+  array = "EPIC",
+  genome = "hg38"
+)
+```
+
+```{r}
+write_csv(
+  results_anno,
+  file.path(dir.results, "meta_analysis_FHS9_ADNI_DMR_results_annotated.csv")
+)
+```
+
+## Significant results
+
+```{r eval = T, echo = F}
+results_anno <- read_csv(
+  file.path(dir.results, "meta_analysis_FHS9_ADNI_DMR_results_annotated.csv"),
+  show_col_types = F
+)
+results_anno %>% 
+  filter(fdr < 0.05 & direction %in% c("++", "--"))
+```
+
+```{r}
+write_csv(
+  results_anno %>% 
+  filter(fdr < 0.05 & direction %in% c("++", "--")),
+  file.path(dir.results, "meta_analysis_FHS9_ADNI_DMR_results_annotated_filtered.csv")
+)
+```
+
+# Merge coMethDMR with combp results
+
+```{r eval = T}
+combp_results <- read_csv(
+  file.path(dir.results, "combp_filtered_results_annotated.csv"),
+  show_col_types = F
+)
+coMeth_results <- read_csv(
+  file.path(dir.results, "meta_analysis_FHS9_ADNI_DMR_results_annotated_filtered.csv"),
+  show_col_types = F
+)
+```
+
+## Combp significant regions
+
+```{r echo = F, eval = T}
+combp_results
+```
+
+## Find overlap region
+
+```{r  eval = T}
+coMeth_region <- coMeth_results$input_region
+combp_region <- combp_results$region
+overlapping_rg <- map_overlap_region(coMeth_region, combp_region)
+```
+
+```{r eval = T}
+coMeth_region <- coMeth_region[-overlapping_rg$output_idx]
+coMeth_region <- c(coMeth_region, overlapping_rg$output_region)
+ggvenn::ggvenn(list("Sig. regions in combp" = combp_region,
+                    "Sig. regions in coMethDMR" = coMeth_region),
+               text_size = 4,
+               set_name_size = 4)
+```
+
+```{r}
+ggsave(file.path(dir.base, "analysis_results/plots/venn_plot_sig_regions.pdf"),
+       width = 6, height = 4)
+```
+
+## Select overlap region
+
+```{r}
+coMeth_results_overlap <- coMeth_results[overlapping_rg$input_idx,]
+combp_results_overlap <- combp_results[overlapping_rg$output_idx,]
+```
+
+```{r}
+combp_df <- combp_results_overlap %>% 
+  dplyr::select(
+    DMR = region, num_probes, z_p, z_sidak_p, direction, cpgs_in_region,
+    GREAT_annotation, UCSC_RefGene_Group, UCSC_RefGene_Name, Relation_to_Island, E073_15_coreMarks_segments_state
+  )
+dmr_df <- coMeth_results_overlap %>% 
+  dplyr::select(
+    Rgion = input_region, estimate, se, pVal.fixed, fdr, direction_cohort = direction,
+    ADNI_region = ADNI_out_region, ADNI_n, ADNI_Estimate.bacon, ADNI_StdErr.bacon, ADNI_pValue.bacon, 
+    FHS_region = FHS9_out_region, FHS9_n, FHS9_Estimate.bacon, FHS9_StdErr.bacon, FHS9_pValue.bacon
+  )
+```
+
+## Save results
+
+```{r}
+writexl::write_xlsx(
+  list(coMethDMR = coMeth_results_overlap,
+       combp = combp_results_overlap),
+  file.path(dir.results, "coMeth_combp_overlap_dmr.xlsx")
+)
+```
+
+```{r}
+write_csv(
+  cbind(combp_df, dmr_df) %>% arrange(z_p),
+  file.path(dir.results, "coMeth_combp_overlap_dmr.csv")
+)
+```
+
+## Combine with meta-analysis results
+
+```{r}
+meta_results <- read_csv(
+  file.path(dir.results.meta,
+            "meta_analysis_FHS9_ADNI_results.csv")
+)
+```
+
+```{r}
+# top 10 dmr
+## combp
+combp_df_top10 <- combp_results %>% 
+  slice_min(z_p, n = 10) %>%
+  arrange(z_p) %>%
+  separate_longer_delim(cpgs_in_region, ",") %>% 
+  dplyr::select(region, cpg = cpgs_in_region, z_p, z_sidak_p) 
+combp_df_top10 <- left_join(combp_df_top10, meta_results)
+
+## ADNI
+coMethDMR_top10_adni <- coMeth_results %>% 
+  slice_min(ADNI_pValue.bacon, n = 10) %>% 
+  arrange(ADNI_pValue.bacon) %>%
+  separate_longer_delim(ADNI_CpGsinRegion, ",") %>% 
+  dplyr::select(ADNI_region = ADNI_out_region, cpg = ADNI_CpGsinRegion, 
+                ADNI_coMeth_estimate = ADNI_Estimate.bacon,
+                ADNI_coMeth_se = ADNI_StdErr.bacon,
+                ADNI_coMeth_pval = ADNI_pValue.bacon,
+                ADMO_coMeth_fdr = ADNI_fdr.bacon) 
+coMethDMR_top10_adni <- left_join(
+  coMethDMR_top10_adni, 
+  meta_results %>% dplyr::select(
+    cpg, seqnames, start, end, Relation_to_UCSC_CpG_Island, UCSC_RefGene_Name, 
+    UCSC_RefGene_Group, GREAT_annotation, 
+    ADNI_single_cpg_estimate = ADNI_Estimate.bacon, 
+    ADNI_single_cpg_se = ADNI_StdErr.bacon,
+    ADNI_single_cpg_pval = ADNI_pValue.bacon,
+    ADNI_single_cpg_fdr = ADNI_fdr.bacon
+  )
+)
+
+## FHS
+coMethDMR_top10_fhs <- coMeth_results %>% 
+  slice_min(FHS9_pValue.bacon, n = 10) %>% 
+  arrange(FHS9_pValue.bacon) %>%
+  separate_longer_delim(FHS9_CpGsinRegion, ",") %>% 
+  dplyr::select(FHS_region = FHS9_out_region, cpg = FHS9_CpGsinRegion, 
+                FHS_coMeth_estimate = FHS9_Estimate.bacon,
+                FHS_coMeth_se = FHS9_StdErr.bacon,
+                FHS_coMeth_pval = FHS9_pValue.bacon,
+                FHS_coMeth_fdr = FHS9_fdr.bacon) 
+coMethDMR_top10_fhs <- left_join(
+  coMethDMR_top10_fhs, 
+  meta_results %>% dplyr::select(
+    cpg, seqnames, start, end, Relation_to_UCSC_CpG_Island, UCSC_RefGene_Name, 
+    UCSC_RefGene_Group, GREAT_annotation, 
+    FHS_single_cpg_estimate = FHS9_Estimate.bacon, 
+    FHS_single_cpg_se = FHS9_StdErr.bacon,
+    FHS_single_cpg_pval = FHS9_pValue.bacon,
+    FHS_single_cpg_fdr = FHS9_fdr.bacon
+  )
+)
+
+writexl::write_xlsx(
+  list(combp_top10 = combp_df_top10,
+       coMeth_ADNI_top10 = coMethDMR_top10_adni,
+       coMeth_FHS_top10 = coMethDMR_top10_fhs),
+  file.path(dir.results, "coMeth_combp_overlap_dmr_top10.xlsx")
+)
+```
+
+# Session Information
+
+<details>
+  <summary>**Session Info**</summary>
+```{r session, eval = T}
+sessionInfo()
+```
+</details>

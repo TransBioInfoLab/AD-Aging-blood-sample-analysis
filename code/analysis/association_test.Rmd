@@ -1,0 +1,461 @@
+---
+title: "Aging analysis"
+author: 
+  - Wei Zhang^[University of Miami]
+  - Lily Wang^[University of Miami]
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_document:
+    highlight: pygments
+    theme: yeti
+    toc: true
+    number_sections: true
+    df_print: paged
+    code_download: false
+    toc_float:
+      collapsed: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: inline    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = F)
+dir.base <- "../.."
+dir.results <- file.path(dir.base, "analysis_results")
+dir.cpg.test <- file.path(dir.results, "cpg_test")
+dir.meta <- file.path(dir.results, "meta_analysis")
+dir.data.aux <- file.path(dir.base,"../DATASETS/Aux_Sync/") 
+for(p in grep("dir",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+```
+
+```{r load function, eval=T, message=FALSE, warning=FALSE}
+source(file.path(dir.base, "/code/utility/cpg_test.R"))
+source(file.path(dir.base, "/code/utility/annotation_and_bacon.R"))
+source(file.path(dir.base, "/code/utility/meta.R"))
+source(file.path(dir.base, "/code/utility/pathway.R"))
+source(file.path(dir.base, "/code/utility/plot.R"))
+```
+
+# Association test
+
+## ADNI
+
+```{r, eval = T}
+dir.cpg.test.adni <- file.path(dir.cpg.test, "ADNI")
+for(p in grep("dir",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+```
+
+```{r}
+# Load data from previous analysis
+dir.data <- file.path(dir.base, "../DNAm-Longitudinal-Cognition/datasets/ADNI/BEclear") 
+adni_se <- readRDS(
+  file.path(dir.data, "ADNI_BEclear_se.rds")
+)
+# Remove samples < 65
+adni_se <- adni_se[,adni_se$age_at_visit >= 65] # 211
+# Remove DEM_STATUS == 1
+adni_se <- adni_se[,adni_se$DEM_STATUS == 0] # 193
+pheno <- colData(adni_se) %>%
+  data.frame()
+beta <- assay(adni_se)
+```
+
+### Check distribution
+
+```{r}
+# age
+mean(pheno$age_at_visit)
+sd(pheno$age_at_visit)
+# follow up time
+mean(pheno$SurvDays)/365
+sd(pheno$SurvDays)/365
+# sex
+pheno %>% 
+  summarise(n = n(), 
+            freq = n/nrow(pheno) * 100,
+            .by = PTGENDER)
+# education
+mean(pheno$PTEDUCAT, na.rm = T)
+sd(pheno$PTEDUCAT, na.rm = T)
+# smoking
+medhist <- read_csv(
+  file.path(dir.base, "../DATASETS/ADNI/Phenotype/raw/MEDHIST.csv")
+)
+medhist <- medhist %>%
+  dplyr::select(RID, MH16SMOK) %>% 
+  group_by(RID) %>%
+  slice_max(MH16SMOK, with_ties = F) %>% # For each participant (RID), if any record indicates a history of smoking (MH16SMOK = 1), that row is retained.
+  ungroup()
+pheno <- left_join(pheno, medhist)
+sum(pheno$MH16SMOK)/193
+```
+
+
+### CpG test
+
+```{r}
+results <- lm_test(
+  beta = beta,
+  pheno = pheno,
+  test_var = "age_at_visit",
+  covariates = c("PTGENDER", "B", "NK", "CD4T", "Mono", "Gran"),
+  convert_to_M = T,
+  scale = F,
+  save = T,
+  dir.save = dir.cpg.test.adni,
+  prefix = "ADNI"
+)
+```
+
+### Add annotation
+
+```{r eval = F, message = F, echo = F}
+results <- read_csv(
+  file.path(dir.cpg.test.adni, "ADNI_single_cpg_test_results.csv"),
+  show_col_types = F
+)
+```
+
+```{r warning = F}
+# This function is load from annotation_and_bacon.R
+results_anno <- annotate_results(results,
+                                 array = "EPICv1",
+                                 genome = "hg38",
+                                 save = F,
+                                 dir.data.aux = dir.data.aux,
+                                 dir.save = dir.cpg.test.adni,
+                                 prefix = "ADNI_single_cpg_test")
+```
+
+### Bacon correction
+
+```{r eval = T, message = F, echo = F}
+results_anno <- read_csv(
+  file.path(dir.cpg.test.adni, "ADNI_single_cpg_test_annotated_results.csv"),
+  show_col_types = F
+)
+```
+
+```{r eval = T, warning = F}
+results_anno$z <- qnorm(results_anno$pr_t)
+# This function is load from annotation_and_bacon.R
+results_bacon <- bacon_adj(
+  data = results_anno,
+  est_var = "estimate",
+  z_var = "z",
+  std_var = "std_error",
+  save = T,
+  dir.save = dir.cpg.test.adni,
+  prefix = "ADNI_single_cpg_test")
+```
+
+```{r}
+results_adni <- read_csv(
+  file.path(dir.cpg.test.adni, "ADNI_single_cpg_test_bacon_correction.csv")
+)
+sig_cpgs <- results_adni %>% 
+  slice_min(pValue.bacon, n = 5)
+
+write_csv(
+  data.frame(pheno, t(beta[sig_cpgs$cpg,])),
+  file = file.path(dir.base, "datasets/test/ADNI_sig_top5.csv")
+)
+```
+
+## Framingham
+
+```{r, eval = T}
+dir.cpg.test.fhs <- file.path(dir.cpg.test, "Framingham")
+for(p in grep("dir",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+```
+
+Independent analysis 
+
+```{r}
+# Load data from previous analysis
+dir.data <- file.path(dir.base,"../DATASETS/Framingham")
+dir.data.processed <- file.path(dir.data, "DNAm/processed/EPIC") 
+framingham_se <- readRDS(
+  file.path(dir.data.processed, "FHS_OffSpring_EPIC_rm_dem_nw_se.RDS")
+)
+# Remove samples < 65
+framingham_se <- framingham_se[,framingham_se$Age_at_collection >= 65] 
+# Remove DEM_STATUS == 1
+framingham_se <- framingham_se[,framingham_se$DEM_STATUS == 0] # 699
+pheno <- colData(framingham_se) %>%
+  data.frame()
+beta <- assay(framingham_se)
+# Select samples that have highest bc score in each pedno
+pheno_df <- pheno %>% 
+  group_by(pedno) %>% 
+  slice_max(bisulfiteConversion) #282
+beta_selected <- beta[,pheno_df$sample]
+```
+
+```{r}
+# age
+mean(pheno_df$Age_at_collection)
+sd(pheno_df$Age_at_collection)
+# follow up time
+mean(pheno_df$dem_followup_time)/365
+sd(pheno_df$dem_followup_time)/365
+# sex
+pheno_df %>% 
+  ungroup() %>%
+  dplyr::summarise(n = n(), 
+            freq = n/nrow(pheno_df) * 100,
+            .by = sex)
+# education
+mean(pheno_df$EDUC_YEAR, na.rm = T)
+sd(pheno_df$EDUC_YEAR, na.rm = T)
+# smoking
+pheno_df %>% 
+  ungroup() %>%
+  summarise(n = n(), 
+            freq = n/nrow(pheno_df) * 100,
+            .by = smoking_status)
+pheno_df <- pheno_df %>% 
+  mutate(smoking_hist = ifelse(is.na(smoking_status), NA, ifelse(
+         smoking_status %in% c(1,2), 1, 0)))
+sum(pheno_df$smoking_hist, na.rm = T)/282
+```
+
+### CpG test
+
+```{r}
+results <- lm_test(
+  beta = beta_selected,
+  pheno = pheno_df,
+  test_var = "Age_at_collection",
+  covariates = c("sex", "B", "NK", "CD4T", "Mono", "Gran"),
+  convert_to_M = T,
+  scale = F,
+  save = T,
+  dir.save = dir.cpg.test.fhs,
+  prefix = "Framingham_ind_sample"
+)
+```
+
+### Add annotation
+
+```{r warning = F}
+# This function is load from annotation_and_bacon.R
+results_anno <- annotate_results(results,
+                                 array = "EPICv1",
+                                 genome = "hg38",
+                                 dir.data.aux = dir.data.aux,
+                                 dir.save = dir.cpg.test.fhs,
+                                 prefix = "Framingham_ind_sample_single_cpg_test")
+```
+
+### Bacon correction
+
+```{r eval = T, message = F, echo = F, warning = F}
+results_anno <- read_csv(
+  file.path(dir.cpg.test.fhs, "Framingham_ind_sample_single_cpg_test_annotated_results.csv"),
+  show_col_types = F
+)
+```
+
+```{r, eval = T, warning = F}
+results_anno$z <- qnorm(results_anno$pr_t)
+# This function is load from annotation_and_bacon.R
+results_bacon <- bacon_adj(
+  data = results_anno,
+  est_var = "estimate",
+  z_var = "z",
+  std_var = "std_error",
+  save = T,
+  dir.save = dir.cpg.test.fhs,
+  prefix = "Framingham_ind_sample_single_cpg_test")
+```
+
+```{r}
+results_fhs <- read_csv(
+  file.path(dir.cpg.test.fhs, "Framingham_ind_sample_single_cpg_test_bacon_correction.csv")
+)
+sig_cpgs <- results_fhs %>% 
+  slice_min(pValue.bacon, n = 5)
+
+write_csv(
+  data.frame(pheno_df, t(beta_selected[sig_cpgs$cpg,])),
+  file = file.path(dir.base, "datasets/test/FHS_sig_top5.csv")
+)
+```
+
+# Meta analysis
+
+## Load results from individual analysis
+
+```{r message = F}
+# FHS exam 9
+results_fhs9 <- read_csv(
+  file.path(dir.cpg.test.fhs, "Framingham_ind_sample_single_cpg_test_bacon_correction.csv")
+)
+results_fhs9 <- results_fhs9 %>% 
+  mutate(study = "FHS",
+         study_id = "FHS9")
+# ADNI
+results_adni <- read_csv(
+  file.path(dir.cpg.test.adni, "ADNI_single_cpg_test_bacon_correction.csv")
+)
+results_adni <- results_adni %>% 
+  mutate(study = "ADNI",
+         study_id = "ADNI")
+```
+
+## Analysis
+
+```{r echo = F, eval = F}
+# Create list for meta analysis
+results_list <- list(
+  FHS9 = results_fhs9,
+  ADNI = results_adni
+)
+# Function meta_wrapper load from meta.R
+results <- meta_wrapper(
+  results_list = results_list,
+  effect = "Estimate.bacon",
+  se = "StdErr.bacon",
+  sm = "OR"
+)
+# Remove hg38 NA, chrX and chrY annotation
+results <- results %>% 
+  filter(!is.na(seqnames)) %>%
+  filter(!seqnames %in% c("chrX", "chrY"))
+# Remove duplicate locations
+results <- results %>% group_by(
+  seqnames, start
+) %>% slice_min(pVal.fixed, with_ties = F)
+# Save results
+write_csv(
+  results,
+  file.path(dir.meta,
+            "meta_analysis_FHS9_ADNI_results.csv")
+)
+```
+
+## Significant results
+
+```{r}
+results <- read_csv(
+    file.path(dir.meta,
+            "meta_analysis_FHS9_ADNI_results.csv")
+)
+```
+
+```{r}
+results_sig <- results %>% 
+  filter (pVal.fixed < 1e-05 & direction %in% c("++", "--")) %>% 
+  dplyr::select(cpg, seqnames, start, GREAT_annotation, UCSC_RefGene_Name, UCSC_RefGene_Group, Relation_to_UCSC_CpG_Island, 
+                estimate, se, pVal.fixed, direction, fdr, 
+                FHS9_estimate, FHS9_std_error, FHS9_pr_t, FHS9_fdr,
+                ADNI_estimate, ADNI_std_error, ADNI_pr_t, ADNI_fdr)
+```
+
+```{r}
+write_csv(
+  results_sig %>% arrange(pVal.fixed),
+  file.path(dir.meta, "meta_analysis_FHS9_ADNI_sig_results.csv")
+)
+```
+
+# Pathway analysis 
+
+```{r eval = T}
+dir.pathway <-file.path(dir.results, "pathway_analysis")
+dir.plot <- file.path(dir.results, "plots")
+for(p in grep("dir",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+library(IlluminaHumanMethylationEPICanno.ilm10b4.hg19)
+```
+
+```{r message = F}
+## Load meta results
+results <- read_csv(
+  file.path(dir.meta,
+            "meta_analysis_FHS9_ADNI_results.csv")
+)
+
+cpg_list <- results %>% pull(pVal.fixed, name = cpg)
+```
+
+```{r eval = F}
+results_pathway <- methylGSA_wrapper(
+  cpg.pval = cpg_list,
+  array = "EPIC",
+  method = "GSEA",
+  GS = c("KEGG", "Reactome"),
+  minsize = 2,
+  maxsize = 200
+)
+
+writexl::write_xlsx(
+  list(KEGG = results_pathway$KEGG$results,
+       Reactome = results_pathway$Reactome$results),
+  file.path(dir.pathway, "methylGSA_pathway_analysis_GSEA_KEGG_Reactome_range_2_200_results.xlsx")
+)
+```
+
+## Plot
+
+```{r eval = T}
+results_pathway <- plyr::llply(
+  c("KEGG", "Reactome"),
+  .fun = function(i) {
+    readxl::read_xlsx(
+      file.path(dir.pathway, "methylGSA_pathway_analysis_GSEA_KEGG_Reactome_range_2_200_results.xlsx"),
+      sheet = i
+    )
+  }
+)
+names(results_pathway) <- c("KEGG", "Reactome")
+results_pathway$Reactome$Description <- gsub("Homo sapiens: ", "", results_pathway$Reactome$Description)
+```
+
+### KEGG
+
+```{r fig.height=10, fig.width=10, eval = T}
+p1 <- plot_pathway(results_pathway$KEGG, title = "KEGG", ylim = 1e-10)
+p1
+```
+
+```{r eval = F}
+ggsave(
+  filename =  file.path(dir.plot,"KEGG_barplot.pdf"),
+  height = 8,
+  width = 12
+)
+```
+
+### Reactome
+
+```{r fig.height=12, fig.width=10, eval = T}
+p2 <- plot_pathway(results_pathway$Reactome, title = "Reactome", ylim = 1e-10)
+p2
+```
+
+```{r eval = F}
+ggsave(
+  filename =  file.path(dir.plot,"Reactome_barplot.pdf"),
+  height = 12,
+  width = 20
+)
+```
+
+```{r eval = F}
+plot_grid(p1,p2,ncol = 1, align="v",
+          labels = "AUTO") +
+    theme(plot.margin = unit(c(.5,.5,1.5,.5), "in"))
+
+ggsave(
+  filename =  file.path(dir.plot,"KEGG_Reactome_barplot.pdf"),
+  height = 25,
+  width = 14
+)
+ggsave(
+  filename =  file.path(dir.plot,"KEGG_Reactome_barplot.png"),
+  height = 25,
+  width = 14
+)
+```

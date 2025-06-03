@@ -1,0 +1,304 @@
+---
+title: "Compare of previous studies"
+subtitle: "MIAMI-AD"
+author: 
+  - Wei Zhang^[University of Miami]
+  - Lily Wang^[University of Miami]
+date: "`r Sys.Date()`"
+output:
+  rmarkdown::html_document:
+    highlight: pygments
+    theme: yeti
+    toc: true
+    number_sections: true
+    df_print: paged
+    code_download: false
+    toc_float:
+      collapsed: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: inline    
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(eval = T)
+dir.base <- "../.."
+dir.results <- file.path(dir.base, "analysis_results")
+dir.cpg.test <- file.path(dir.results, "cpg_test")
+dir.meta <- file.path(dir.results, "meta_analysis")
+dir.dmr <- file.path(dir.results, "DMR")
+dir.results.compare <- file.path(dir.results, "compare_study")
+dir.data.aux <- file.path(dir.base,"../DATASETS/Aux_Sync/") 
+dir.data.study <- file.path(dir.base,"datasets/compare_study") 
+for(p in grep("dir",ls(),value = T)) dir.create(get(p),recursive = TRUE,showWarnings = FALSE)
+```
+
+```{r}
+library(tidyverse)
+```
+
+# Load results
+
+```{r}
+# Single CpGs
+results <- read_csv(
+   file.path(dir.meta,
+            "meta_analysis_FHS9_ADNI_results.csv"),
+   show_col_types = F
+) %>% 
+  dplyr::select(cpg, seqnames, start, GREAT_annotation, estimate, se, pVal.fixed, direction) %>% 
+  dplyr::rename_with(~paste0("aging_assoc_", .x), !c(cpg, seqnames, start, GREAT_annotation)) 
+results_sig <- results %>% 
+  filter(aging_assoc_pVal.fixed < 1e-05, aging_assoc_direction %in% c("++", "--")) %>%
+  mutate(aging_assoc_direction = ifelse(aging_assoc_direction == "--", "-", "+"))
+# DMR
+sig.dmr.df <- read_csv(
+  file.path(dir.dmr, "coMeth_combp_overlap_dmr.csv")
+) 
+sig.dmr <- str_split(sig.dmr.df$cpgs_in_region, ",") %>% unlist() 
+common_cpg <- intersect(sig.dmr, results_sig$cpg)
+all_cpg <- union(sig.dmr, results_sig$cpg)
+
+results_sig <- results %>% 
+  filter(cpg %in% all_cpg) %>%
+  mutate(Source = ifelse(cpg %in% common_cpg, "individual CpG + CpG in DMR",
+                   ifelse(cpg %in%  sig.dmr[! sig.dmr %in% common_cpg], "CpG in DMR", "individual CpG")))
+```
+
+# Load reference
+
+```{r}
+reference_cpgs <- readxl::read_xlsx(
+  file.path(dir.data.study, "CpG Statistics.xlsx"),
+  sheet = 3
+) %>% filter(pValue < 0.05) %>%
+  dplyr::select(cpg = CpG, Dataset = dataset, Cohort = sample_group, phenotype, 
+                sex_specific, statistics, direction, statistics_value, pValue)
+reference_study <- readxl::read_xlsx(
+  file.path(dir.data.study, "CpG Statistics.xlsx"),
+  sheet = 1
+) %>% mutate(PMID = gsub("\\D",  "",PMID))
+reference_study$PMID[reference_study$Dataset == "ZDH"] = "40133250"
+reference_study$Year[reference_study$Dataset == "ZDH"] = 2025
+```
+
+# Overlap CpGs
+
+```{r}
+df <- inner_join(
+  results_sig,
+  reference_cpgs
+) %>% left_join(reference_study)
+```
+
+```{r eval = F}
+writexl::write_xlsx(
+  df %>% arrange(pValue),
+  file.path(dir.results.compare, "Compare_study_aging_and_miamiad.xlsx")
+)
+```
+
+# Compare pathways 
+
+```{r}
+df <- readxl::read_xlsx(file.path(dir.results.compare, "Compare_study_aging_and_miamiad.xlsx"))
+df <- df[!grepl("^(ADNI|FHS9)", df$Cohort), ]
+df <- df[!df$statistics == "ANOVA F-statistic for CN vs MCI vs  AD",]
+df$type <- ifelse(grepl("^Blood|^DNAm", df$Description), "Blood", "Brain")
+df <- df %>% 
+  group_by(cpg, type) %>% 
+  slice_min(pValue, with_ties = F) %>%
+  ungroup()
+```
+
+## Count numbers
+
+```{r counts-with-cats, echo = F}
+# 1) Total unique CpGs in df
+n_total <- df %>% 
+  pull(cpg) %>% 
+  unique() %>% 
+  length()
+cat("1) Total unique CpGs in df: ", n_total, "\n")
+
+# 2) Unique CpGs annotated as Blood / DNAm
+blood <- df %>% 
+  filter(grepl("^Blood|^DNAm", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_blood <- length(blood)
+cat("2) Unique Blood/DNAm CpGs: ", n_blood, "\n")
+
+# 3) Aging-associated in blood: ++ (both flags +)
+results_blood_pos <- df %>% 
+  filter(aging_assoc_direction == "++",
+         direction == "+",
+         grepl("^Blood|^DNAm", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_blood_pos <- length(results_blood_pos)
+cat("3) Blood CpGs with ++ (positive aging assoc): ", n_blood_pos, "\n")
+
+# 4) Aging-associated in blood: -- (both flags -)
+results_blood_neg <- df %>% 
+  filter(aging_assoc_direction == "--",
+         direction == "-",
+         grepl("^Blood|^DNAm", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_blood_neg <- length(results_blood_neg)
+cat("4) Blood CpGs with -- (negative aging assoc): ", n_blood_neg, "\n")
+
+# 4a) ++ aging_assoc_direction but direction == "-"
+results_blood_pos_dis <- df %>% 
+  filter(aging_assoc_direction == "++",
+         direction == "-",
+         grepl("^Blood|^DNAm", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_blood_mis1 <- length(results_blood_pos_dis)
+cat("4a) Blood CpGs with ++ aging_assoc_direction but - direction: ", n_blood_mis1, "\n")
+
+# 4b) -- aging_assoc_direction but direction == "+"
+results_blood_neg_dis <- df %>% 
+  filter(aging_assoc_direction == "--",
+         direction == "+",
+         grepl("^Blood|^DNAm", Description)) %>% 
+  pull(cpg) %>% 
+  unique() 
+n_blood_mis2 <- length(results_blood_neg_dis)
+cat("4b) Blood CpGs with -- aging_assoc_direction but + direction: ", n_blood_mis2, "\n")
+
+# 5) Total aging-associated in blood (3 + 4)
+cat("5) Total aging-associated CpGs in blood: ",
+    n_blood_pos + n_blood_neg, "\n")
+
+# 6) Unique CpGs annotated as Brain
+brain <- df %>% 
+  filter(grepl("^Brain", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_brain <- length(brain)
+cat("6) Unique Brain CpGs: ", n_brain, "\n")
+
+# 7) Overlap between brain and blood
+n_overlap <- length(intersect(brain, blood))
+cat("7) Overlap CpGs (Brain ∩ Blood): ", n_overlap, "\n")
+
+# 8) Aging-associated in brain: ++
+results_brain_pos <- df %>% 
+  filter(aging_assoc_direction == "++",
+         direction == "+",
+         grepl("^Brain", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_brain_pos <- length(results_brain_pos)
+cat("8) Brain CpGs with ++ (positive aging assoc): ", n_brain_pos, "\n")
+
+# 9) Aging-associated in brain: --
+results_brain_neg <- df %>% 
+  filter(aging_assoc_direction == "--",
+         direction == "-",
+         grepl("^Brain", Description)) %>% 
+  pull(cpg) %>% 
+  unique()
+n_brain_neg <- length(results_brain_neg)
+cat("9) Brain CpGs with -- (negative aging assoc): ", n_brain_neg, "\n")
+```
+
+```{r echo = F}
+total_blood_assoc <- n_blood_pos + n_blood_neg
+
+summary_df <- tibble(
+  Metric = c(
+    "Total unique CpGs in df",
+    "Unique Blood/DNAm CpGs",
+    "Blood CpGs with + (positive aging assoc)",
+    "Blood CpGs with - (negative aging assoc)",
+    "Blood CpGs with + but - direction",
+    "Blood CpGs with - but + direction",
+    "Total aging-associated CpGs in blood",
+    "Unique Brain CpGs",
+    "Overlap CpGs (Brain ∩ Blood)",
+    "Brain CpGs with ++",
+    "Brain CpGs with --"
+  ),
+  Count = c(
+    n_total,
+    n_blood,
+    n_blood_pos,
+    n_blood_neg,
+    n_blood_mis1,
+    n_blood_mis2,
+    total_blood_assoc,
+    n_brain,
+    n_overlap,
+    n_brain_pos,
+    n_brain_neg
+  )
+)
+
+knitr::kable(
+  summary_df,
+  caption = "Summary of CpG counts across blood vs. brain and aging‐association"
+)
+```
+
+
+```{r message = F, warning = F}
+source("../utility/annotation_and_bacon.R")
+source(file.path(dir.base, "/code/utility/pathway.R"))
+```
+
+# Pathway analysis
+
+```{r}
+blood_list <- list(
+  hyper = results_blood_pos,
+  hypo = results_blood_neg,
+  all = c(results_blood_pos, results_blood_neg)
+)
+```
+
+```{r}
+gsa <- plyr::llply(
+  blood_list,
+  .fun = function(cpgs) {
+    missMethyl_wrapper(dir.data.aux = dir.data.aux, use_msigdbr = F, sig.cpg = cpgs, array.type = "EPIC")
+  }
+)
+
+```
+
+```{r}
+writexl::write_xlsx(
+  gsa %>% purrr::map(., ~arrange(., FDR)),
+  file.path(dir.results.compare, "missMethyl_pathway_concordance_results.xlsx")
+)
+```
+
+```{r}
+blood_list <- list(
+  hyper = results_blood_pos_dis,
+  hypo = results_blood_neg_dis,
+  all = c(results_blood_pos_dis, results_blood_neg_dis)
+)
+```
+
+```{r}
+gsa <- plyr::llply(
+  blood_list,
+  .fun = function(cpgs) {
+    missMethyl_wrapper(dir.data.aux = dir.data.aux, use_msigdbr = F, sig.cpg = cpgs, array.type = "EPIC")
+  }
+)
+
+```
+
+```{r}
+writexl::write_xlsx(
+  gsa %>% purrr::map(., ~arrange(., FDR)),
+  file.path(dir.results.compare, "missMethyl_pathway_disconcordance_results.xlsx")
+)
+```
+
