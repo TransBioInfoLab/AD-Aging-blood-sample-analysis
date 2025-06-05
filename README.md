@@ -1,4 +1,4 @@
-# **The Aging Epigenome: Integrative Analyses Reveal Functional and Genetic Links to Alzheimer’s Disease**
+# **The Aging Epigenome: Integrative Analyses Reveal Functional Overlap with Alzheimer’s Disease**
 Wei Zhang, David Lukacsovich, Juan I. Young, Lissette Gomez, Michael A. Schmidt, Brian W. Kunkle, Xi Chen, Eden R. Martin, Lily Wang
 
 ### Description
